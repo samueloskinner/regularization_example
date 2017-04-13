@@ -1,0 +1,204 @@
+---
+title: 'Regularization example'
+author: "Samuel O Skinner"
+date: "April 12, 2017"
+output:
+  html_document:
+    number_sections: yes
+---
+
+
+```{r global_opts, echo=FALSE, cache=FALSE}
+knitr::opts_chunk$set(fig.width=8, fig.height=4, fig.align='center',
+                      echo=TRUE, warning=FALSE, message=FALSE,
+                      cache=FALSE, autodep=TRUE)
+# knitr::opts_knit$set(root.dir = "..")
+
+## numbers >= 10^5 will be denoted in scientific notation,
+## and rounded to 2 digits
+options(scipen = 1, digits = 5)
+```
+
+
+# Summary
+
+
+----- 
+
+# R environment set-up
+
+## Loading packages
+
+```{r load_packages, cache=FALSE}
+# Clean up the environment
+rm(list = ls())
+cleanup <- gc(verbose = FALSE)
+
+# Load libraries I'll need here
+library(MASS)
+library(dplyr)
+library(limma)
+library(edgeR)
+library(readr)
+library(readxl)
+library(ggplot2)
+library(cowplot)
+library(reshape2)
+library(WGCNA)
+library(gplots)
+library(corrplot)
+library(caret)
+library(leaps)
+
+library(glmnet)
+
+# Packages for R markdown stuff
+library(knitr)
+library(shiny)
+
+# Required for WGCNA to work properly
+options(stringsAsFactors = FALSE)
+```
+
+
+# Create data to demonstrate overfitting
+
+```{r simulate_data}
+
+# For all simulated networks, start with correlation matrix
+
+x <- seq(1,10)
+yhat <- 15 - 10*x + 3*(x)^2 - .2*(x)^3
+
+set.seed(150)
+x1 <- seq(1,10) + rnorm(10,0,0.25)
+
+set.seed(1050)
+y1 <- 15 - 10*x1 + 3*(x1)^2 - .2*(x1)^3 + 1.0*rnorm(10)
+
+set.seed(4440)
+x2 <- seq(1,10) + rnorm(10,0,0.25)
+
+set.seed(245)
+y2 <- 15 - 10*x2 + 3*(x2)^2 - .2*(x2)^3 + 1.0*rnorm(10)
+
+
+fit.data <- data.frame(x1=x1,
+                       x2=x2,
+                       y1=y1,
+                       y2=y2, 
+                       yhat=yhat, 
+                       x=x)
+
+
+
+x_mat <- matrix(NA, nrow = 10, ncol = 9)
+x_mat[,1] <- x
+x_mat[,2] <- x^2
+x_mat[,3] <- x^3
+x_mat[,4] <- x^4
+x_mat[,5] <- x^5
+x_mat[,6] <- x^6
+x_mat[,7] <- x^7
+x_mat[,8] <- x^8
+x_mat[,9] <- x^9
+
+
+
+ggplot(fit.data) +
+  geom_point(aes(x=x1,y=y1), color="blue") + 
+  geom_point(aes(x=x2,y=y2), color="red") + 
+  geom_line(aes(x=x,y=yhat), color="green")
+
+
+```
+
+
+```{r, fig.height=6, fig.width=7, echo=F}
+
+
+p1 <- ggplot(fit.data,aes(x=x1,y=y1)) +
+  geom_smooth(method = "lm", formula = yhat ~ poly(x, 3), colour = "green", se=F) +
+  geom_smooth(method = "lm", formula = y ~ poly(x, 1), colour = "red", se=F) +
+  geom_point() + 
+  xlim(0,10)
+
+p2 <- ggplot(fit.data,aes(x=x1,y=y1)) +
+  geom_smooth(method = "lm", formula = yhat ~ poly(x, 3), colour = "green", se=F) +
+  geom_smooth(method = "lm", formula = y ~ poly(x, 2), colour = "red", se=F) +
+  geom_point() + 
+  xlim(0,10)
+
+p3 <- ggplot(fit.data,aes(x=x1,y=y1)) +
+  geom_smooth(method = "lm", formula = yhat ~ poly(x, 3), colour = "green", se=F) +
+  geom_smooth(method = "lm", formula = y ~ poly(x, 4), colour = "red", se=F) +
+  geom_point() + 
+  xlim(0,10)
+
+p4 <- ggplot(fit.data,aes(x=x1,y=y1)) +
+  geom_smooth(method = "lm", formula = yhat ~ poly(x, 3), colour = "green", se=F) +
+  geom_smooth(method = "lm", formula = y ~ poly(x, 8), colour = "red", se=F) +
+  geom_point() + 
+  xlim(0,10)
+
+plot_grid(p1,p2,p3,p4,ncol=2)
+
+
+
+```
+
+
+
+
+
+```{r cv curve, fig.height=3, fig.width=3}
+
+
+
+
+train_err <- list()
+test_err <- list()
+for (p in 1:9) {
+  # p=4
+  
+  fit1 <- lm(formula = y1 ~ poly(x1, p), data=fit.data)
+  
+  train_err[p] <- 0.5*mean((y1 - predict(fit1, new.data=x1))^2)
+  test_err[p]  <- 0.5*mean((y2 - predict(fit1, new.data=x2))^2)
+  
+}
+
+test.results <- data.frame(p <- 1:9,
+                           train_err = unlist(train_err),
+                           test_err  = unlist(test_err))
+
+
+ggplot(test.results) + 
+  geom_line(aes(x=p,y=train_err), color="red") + 
+  geom_line(aes(x=p,y=test_err), color="blue") +
+  theme(legend.position="none") +
+  labs(x="Number of features",
+       y="Prediction error")
+
+
+
+
+```
+
+
+
+
+```{r reg curve, fig.height=6, fig.width=6}
+
+cv <- cv.glmnet(x = x_mat, 
+                y = fit.data$y1,
+                nfolds=8)
+plot(cv)
+
+
+
+```
+
+
+
+
